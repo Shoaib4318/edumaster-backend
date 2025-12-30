@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <link rel="stylesheet" href="css/style.css">
+    <title>Admin Panel</title>
+</head>
+
+<body>
+    <nav>
+        <span>EduMaster Admin Panel</span>
+        <button onclick="logout()" class="btn btn-danger">Logout</button>
+    </nav>
+    <div class="container">
+        <div class="card">
+            <h3>Pending Instructor Approvals</h3>
+            <div id="pending-instructors"></div>
+        </div>
+        <div class="card">
+            <h3>Pending Course Approvals</h3>
+            <div id="pending-courses"></div>
+        </div>
+        <div class="card">
+            <h3>User Management</h3>
+            <div id="all-users"></div>
+        </div>
+    </div>
+    <script>
+        async function authorizedFetch(url, options = {}) {
+            const token = localStorage.getItem('token');
+            
+            const headers = {
+                ...options.headers,
+                'Authorization': token, // Send the JWT
+                'Content-Type': 'application/json'
+            };
+
+            return fetch(url, { ...options, headers });
+        }
+
+        async function approveInstructor(userId) {
+            const response = await authorizedFetch(`/api/admin/approve-instructor/${userId}`, {
+                method: 'PATCH'
+            });
+
+            if (response.ok) {
+                alert("Instructor approved!");
+                loadPendingInstructors();
+            }
+        }
+
+        async function approveCourse(courseId) {
+            const response = await authorizedFetch(`/api/admin/approve-course/${courseId}`, {
+                method: 'PATCH'
+            });
+
+            if (response.ok) {
+                alert("Course is now Published and visible to students!");
+                loadPendingCourses();
+            }
+        }
+
+        async function loadPendingInstructors() {
+            try {
+                const response = await authorizedFetch('/api/admin/pending-instructors');
+                if (!response.ok) throw new Error('Failed to load pending instructors');
+                const instructors = await response.json();
+                const container = document.getElementById('pending-instructors');
+                container.innerHTML = instructors.map(inst => `
+                    <div class="card">
+                        <p><strong>${inst.name}</strong> (${inst.email})</p>
+                        <button onclick="approveInstructor(${inst.id})" class="btn btn-success">Approve</button>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error("Error loading pending instructors:", err);
+                document.getElementById('pending-instructors').innerHTML = '<p>Error loading pending instructors.</p>';
+            }
+        }
+
+        async function loadPendingCourses() {
+            try {
+                const response = await authorizedFetch('/api/admin/pending-courses');
+                if (!response.ok) throw new Error('Failed to load pending courses');
+                const courses = await response.json();
+                const container = document.getElementById('pending-courses');
+                container.innerHTML = courses.map(course => `
+                    <div class="card">
+                        <p><strong>${course.title}</strong> by ${course.instructor_name}</p>
+                        <p>${course.description}</p>
+                        <button onclick="approveCourse(${course.id})" class="btn btn-success">Approve & Publish</button>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error("Error loading pending courses:", err);
+                document.getElementById('pending-courses').innerHTML = '<p>Error loading pending courses.</p>';
+            }
+        }
+
+        async function loadAllUsers() {
+            try {
+                const response = await authorizedFetch('/api/admin/users');
+                if (!response.ok) throw new Error('Failed to load users');
+                const users = await response.json();
+                const container = document.getElementById('all-users');
+                container.innerHTML = users.map(user => `
+                    <div class="card">
+                        <p><strong>${user.name}</strong> (${user.email}) - ${user.role} ${user.is_approved ? '' : '(Pending)'} ${user.is_blocked ? '(Blocked)' : ''}</p>
+                        ${user.role === 'Instructor' && !user.is_approved ? `<button onclick="approveInstructor(${user.id})" class="btn btn-success">Approve</button>` : ''}
+                        <button onclick="toggleBlock(${user.id}, ${user.is_blocked})" class="btn ${user.is_blocked ? 'btn-success' : 'btn-danger'}">${user.is_blocked ? 'Unblock' : 'Block'}</button>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error("Error loading users:", err);
+                document.getElementById('all-users').innerHTML = '<p>Error loading users.</p>';
+            }
+        }
+
+        async function toggleBlock(userId, currentlyBlocked) {
+            const response = await authorizedFetch('/api/admin/manage-user', {
+                method: 'POST',
+                body: JSON.stringify({ user_id: userId, block_status: !currentlyBlocked })
+            });
+            if (response.ok) {
+                loadAllUsers();
+            }
+        }
+
+        // Load data on page load
+        window.onload = () => {
+            loadPendingInstructors();
+            loadPendingCourses();
+            loadAllUsers();
+        };
+    </script>
+    <script src="js/auth.js"></script>
+</body>
+
+</html>

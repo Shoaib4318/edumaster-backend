@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <link rel="stylesheet" href="css/style.css">
+    <title>Instructor Dashboard</title>
+</head>
+
+<body>
+    <nav>
+        <span>EduMaster Instructor</span>
+        <button onclick="logout()" class="btn btn-danger">Logout</button>
+    </nav>
+    <div class="container">
+        <div class="card">
+            <h3>Create New Course</h3>
+            <form id="courseForm">
+                <input type="text" id="courseTitle" placeholder="Course Title" required><br><br>
+                <textarea id="courseDesc" placeholder="Description"></textarea><br><br>
+                <button type="submit" class="btn btn-success">Create Course Draft</button>
+            </form>
+        </div>
+        <h3>My Courses (Status Tracking)</h3>
+        <div id="my-courses-list"></div>
+    </div>
+    <script>
+        async function authorizedFetch(url, options = {}) {
+            const token = localStorage.getItem('token');
+            
+            const headers = {
+                ...options.headers,
+                'Authorization': token, // Send the JWT
+                'Content-Type': 'application/json'
+            };
+
+            return fetch(url, { ...options, headers });
+        }
+
+        async function loadMyCourses() {
+            const response = await authorizedFetch('/api/courses/my-courses');
+            const courses = await response.json();
+            const container = document.getElementById('my-courses-list');
+            container.innerHTML = courses.map(course => `
+                <div class="card">
+                    <h4>${course.title}</h4>
+                    <p>${course.description}</p>
+                    <p>Status: ${course.status}</p>
+                    <p>Enrolled Students: <span id="count-${course.id}">Loading...</span></p>
+                    ${course.status === 'Draft' ? `<button onclick="submitCourse(${course.id})" class="btn btn-primary">Submit for Approval</button>` : ''}
+                    <button onclick="viewEnrolledStudents(${course.id})" class="btn btn-secondary">View Enrolled Students</button>
+                    <button onclick="addLesson(${course.id})" class="btn btn-info">Add Lesson</button>
+                    <button onclick="createQuiz(${course.id})" class="btn btn-warning">Create Quiz</button>
+                    <div id="students-${course.id}" style="display: none;"></div>
+                    <div id="lessons-${course.id}" style="display: none;"></div>
+                    <div id="quiz-${course.id}" style="display: none;"></div>
+                </div>
+            `).join('');
+            // Load student counts
+            courses.forEach(course => loadStudentCount(course.id));
+        }
+
+        async function loadStudentCount(courseId) {
+            const response = await authorizedFetch(`/api/courses/enrolled-students/${courseId}`);
+            const students = await response.json();
+            document.getElementById(`count-${courseId}`).textContent = students.length;
+        }
+
+        async function addLesson(courseId) {
+            const container = document.getElementById(`lessons-${courseId}`);
+            if (container.style.display === 'none') {
+                container.innerHTML = `
+                    <form id="lessonForm-${courseId}">
+                        <input type="text" id="lessonTitle-${courseId}" placeholder="Lesson Title" required><br><br>
+                        <input type="text" id="lessonUrl-${courseId}" placeholder="Content URL" required><br><br>
+                        <input type="number" id="lessonOrder-${courseId}" placeholder="Order Index" required><br><br>
+                        <button type="submit" class="btn btn-success">Add Lesson</button>
+                    </form>
+                `;
+                container.style.display = 'block';
+                document.getElementById(`lessonForm-${courseId}`).addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const title = document.getElementById(`lessonTitle-${courseId}`).value;
+                    const content_url = document.getElementById(`lessonUrl-${courseId}`).value;
+                    const order_index = document.getElementById(`lessonOrder-${courseId}`).value;
+                    const response = await authorizedFetch('/api/courses/lesson', {
+                        method: 'POST',
+                        body: JSON.stringify({ course_id: courseId, title, content_url, order_index })
+                    });
+                    if (response.ok) {
+                        alert("Lesson added!");
+                        container.style.display = 'none';
+                    }
+                });
+            } else {
+                container.style.display = 'none';
+            }
+        }
+
+        async function createQuiz(courseId) {
+            const container = document.getElementById(`quiz-${courseId}`);
+            if (container.style.display === 'none') {
+                container.innerHTML = `
+                    <form id="quizForm-${courseId}">
+                        <input type="text" id="quizTitle-${courseId}" placeholder="Quiz Title" required><br><br>
+                        <textarea id="quizData-${courseId}" placeholder="Question Data (JSON)" required></textarea><br><br>
+                        <input type="number" id="passingScore-${courseId}" placeholder="Passing Score (%)" required><br><br>
+                        <button type="submit" class="btn btn-success">Create Quiz</button>
+                    </form>
+                `;
+                container.style.display = 'block';
+                document.getElementById(`quizForm-${courseId}`).addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    try {
+                        const title = document.getElementById(`quizTitle-${courseId}`).value;
+                        const question_data = JSON.parse(document.getElementById(`quizData-${courseId}`).value);
+                        const passing_score = document.getElementById(`passingScore-${courseId}`).value;
+                        const response = await authorizedFetch('/api/courses/quiz', {
+                            method: 'POST',
+                            body: JSON.stringify({ course_id: courseId, title, question_data, passing_score })
+                        });
+                        if (response.ok) {
+                            alert("Quiz created!");
+                            container.style.display = 'none';
+                        } else {
+                            const error = await response.json();
+                            alert("Error: " + error.error);
+                        }
+                    } catch (err) {
+                        alert("Error creating quiz: " + err.message);
+                    }
+                });
+            } else {
+                container.style.display = 'none';
+            }
+        }
+
+        async function viewEnrolledStudents(courseId) {
+            const container = document.getElementById(`students-${courseId}`);
+            if (container.style.display === 'none') {
+                const response = await authorizedFetch(`/api/courses/enrolled-students/${courseId}`);
+                const students = await response.json();
+                container.innerHTML = students.map(student => `
+                    <div style="margin-top: 10px; padding: 10px; border: 1px solid #ccc;">
+                        <p><strong>Name:</strong> ${student.name}</p>
+                        <p><strong>Email:</strong> ${student.email}</p>
+                        <p><strong>Enrolled At:</strong> ${new Date(student.enrolled_at).toLocaleDateString()}</p>
+                        <p><strong>Progress:</strong> ${student.progress_percentage}%</p>
+                        <p><strong>Completed:</strong> ${student.is_completed ? 'Yes' : 'No'}</p>
+                    </div>
+                `).join('');
+                container.style.display = 'block';
+            } else {
+                container.style.display = 'none';
+            }
+        }
+
+        async function submitCourse(courseId) {
+            try {
+                const response = await authorizedFetch(`/api/courses/submit/${courseId}`, {
+                    method: 'PATCH'
+                });
+                if (response.ok) {
+                    alert("Course submitted for approval!");
+                    loadMyCourses();
+                } else {
+                    const error = await response.json();
+                    alert("Error: " + error.error);
+                }
+            } catch (err) {
+                alert("Error submitting course: " + err.message);
+            }
+        }
+
+        document.getElementById('courseForm')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const title = document.getElementById('courseTitle').value;
+            const description = document.getElementById('courseDesc').value;
+
+            const response = await authorizedFetch('/api/courses/create', {
+                method: 'POST',
+                body: JSON.stringify({ title, description })
+            });
+
+            if (response.ok) {
+                alert("Course draft created successfully!");
+                loadMyCourses();
+            }
+        });
+
+        // Load courses on page load
+        window.onload = loadMyCourses;
+    </script>
+    <script src="js/auth.js"></script>
+</body>
+
+</html>

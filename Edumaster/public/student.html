@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <link rel="stylesheet" href="css/style.css">
+    <title>Student Dashboard</title>
+</head>
+
+<body>
+    <nav>
+        <span>EduMaster Student</span>
+        <button onclick="logout()" class="btn btn-danger">Logout</button>
+    </nav>
+    <div class="container">
+        <h3>Available Courses</h3>
+        <div id="course-list" class="card">
+            <p>Loading courses...</p>
+        </div>
+
+        <h3>My Progress</h3>
+        <div id="enrolled-courses" class="card">
+        </div>
+    </div>
+    <script src="js/api.js"></script>
+    <script src="js/auth.js"></script>
+    <script>
+        // Use authorizedFetch() here to get courses from /api/student/courses
+        // Use this function for any protected data (e.g., getting courses or enrolling)
+        async function enroll(courseId) {
+            try {
+                const response = await authorizedFetch('/api/student/enroll', {
+                    method: 'POST',
+                    body: JSON.stringify({ course_id: courseId })
+                });
+
+                if (response.ok) {
+                    alert("Enrolled successfully!");
+                    loadEnrolledCourses(); // Refresh enrolled courses
+                }
+            } catch (err) {
+                console.error("Enrollment error:", err);
+            }
+        }
+        async function authorizedFetch(url, options = {}) {
+            const token = localStorage.getItem('token');
+
+            const headers = {
+                ...options.headers,
+                'Authorization': token, // Send the JWT
+                'Content-Type': 'application/json'
+            };
+
+            return fetch(url, { ...options, headers });
+        }
+
+        async function loadAvailableCourses() {
+            try {
+                const response = await authorizedFetch('/api/student/courses');
+                if (!response.ok) throw new Error('Failed to load courses');
+                const courses = await response.json();
+                const container = document.getElementById('course-list');
+                container.innerHTML = courses.map(course => `
+                    <div class="card">
+                        <h4>${course.title}</h4>
+                        <p>${course.description}</p>
+                        <p>Instructor: ${course.instructor_name}</p>
+                        <button onclick="enroll(${course.id})" class="btn btn-primary">Enroll</button>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error("Error loading available courses:", err);
+                document.getElementById('course-list').innerHTML = '<p>Error loading courses. Please try logging in again.</p>';
+            }
+        }
+
+        async function loadEnrolledCourses() {
+            try {
+                const response = await authorizedFetch('/api/student/enrolled-courses');
+                if (!response.ok) throw new Error('Failed to load enrolled courses');
+                const courses = await response.json();
+                const container = document.getElementById('enrolled-courses');
+                container.innerHTML = courses.map(course => `
+                    <div class="card">
+                        <h4>${course.title}</h4>
+                        <p>${course.description}</p>
+                        <p id="progress-${course.id}">Progress: ${course.progress_percentage}% ${course.is_completed ? '(Completed)' : ''}</p>
+                        ${course.is_completed ? `<button onclick="viewCertificate(${course.id}, '${course.title}')" class="btn btn-success">View Certificate</button>` : ''}
+                        <button onclick="viewLessons(${course.id})" data-title="${course.title}" class="btn btn-primary">View Lessons</button>
+                        <div id="lessons-${course.id}" style="display: none;"></div>
+                        <div id="certificate-${course.id}" style="display: none;"></div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error("Error loading enrolled courses:", err);
+                document.getElementById('enrolled-courses').innerHTML = '<p>No enrolled courses or error loading.</p>';
+            }
+        }
+
+        async function viewLessons(courseId) {
+            const container = document.getElementById(`lessons-${courseId}`);
+            if (!container) {
+                console.error("Container not found for course " + courseId);
+                return;
+            }
+            const button = document.querySelector(`button[onclick*='viewLessons(${courseId})']`);
+            const courseTitle = button ? button.getAttribute('data-title') : 'Course';
+            if (container.style.display === 'none') {
+                try {
+                    const response = await authorizedFetch(`/api/student/lessons/${courseId}`);
+                    if (!response.ok) throw new Error('Failed to load lessons');
+                    const lessons = await response.json();
+                    const quizResponse = await authorizedFetch(`/api/student/quizzes/${courseId}`);
+                    if (!quizResponse.ok) throw new Error('Failed to load quizzes');
+                    const quizzes = await quizResponse.json();
+                    container.innerHTML = 
+                        (lessons.length > 0 ? lessons.map(lesson => `
+                            <div style="margin-top: 10px; padding: 10px; border: 1px solid #ccc;">
+                                <h5>${lesson.title}</h5>
+                                <p>${lesson.content_url ? `<a href="${lesson.content_url}" target="_blank">View Content</a>` : 'No content available'}</p>
+                            </div>
+                        `).join('') : '<p>No lessons available.</p>') +
+                        (quizzes.length > 0 ? quizzes.map(quiz => `
+                            <div style="margin-top: 10px; padding: 10px; border: 1px solid #ccc;">
+                                <h5>${quiz.title}</h5>
+                                <p>${quiz.question_data}</p>
+                                <button onclick="takeQuiz(${quiz.id}, ${courseId})" class="btn btn-primary">Take Quiz</button>
+                            </div>
+                        `).join('') : '');
+                    container.style.display = 'block';
+                    // Update progress when viewing lessons
+                    const progressRes = await authorizedFetch('/api/student/update-progress', {
+                        method: 'POST',
+                        body: JSON.stringify({ course_id: courseId })
+                    });
+                    if (progressRes.ok) {
+                        const progressData = await progressRes.json();
+                        const progressP = document.getElementById(`progress-${courseId}`);
+                        if (progressP) {
+                            progressP.textContent = `Progress: ${progressData.progress}% ${progressData.progress === 100 ? '(Completed)' : ''}`;
+                            // If completed, add certificate button if not present
+                            if (progressData.progress === 100) {
+                                const card = progressP.closest('.card');
+                                if (!card.querySelector('.btn-success')) {
+                                    const certButton = document.createElement('button');
+                                    certButton.className = 'btn btn-success';
+                                    certButton.onclick = () => viewCertificate(courseId, courseTitle);
+                                    certButton.textContent = 'View Certificate';
+                                    progressP.insertAdjacentElement('afterend', certButton);
+                                }
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.error("Error loading lessons/quizzes:", err);
+                    container.innerHTML = '<p>Error loading content. Please try again.</p>';
+                    container.style.display = 'block';
+                }
+            } else {
+                container.style.display = 'none';
+            }
+        }
+
+        async function takeQuiz(quizId, courseId) {
+            // For simplicity, assume quiz is taken and submit
+            // In real app, show questions and collect answers
+            alert("Quiz taking not fully implemented. Assume submitted.");
+            // Update progress after taking quiz
+            const progressRes = await authorizedFetch('/api/student/update-progress', {
+                method: 'POST',
+                body: JSON.stringify({ course_id: courseId })
+            });
+            if (progressRes.ok) {
+                const progressData = await progressRes.json();
+                const progressP = document.getElementById(`progress-${courseId}`);
+                if (progressP) {
+                    progressP.textContent = `Progress: ${progressData.progress}% ${progressData.progress === 100 ? '(Completed)' : ''}`;
+                    if (progressData.progress === 100) {
+                        const card = progressP.closest('.card');
+                        if (!card.querySelector('.btn-success')) {
+                            const button = document.querySelector(`button[onclick*='viewLessons(${courseId})']`);
+                            const courseTitle = button ? button.getAttribute('data-title') : 'Course';
+                            const certButton = document.createElement('button');
+                            certButton.className = 'btn btn-success';
+                            certButton.onclick = () => viewCertificate(courseId, courseTitle);
+                            certButton.textContent = 'View Certificate';
+                            progressP.insertAdjacentElement('afterend', certButton);
+                        }
+                    }
+                }
+            }
+        }
+
+        async function viewCertificate(courseId, courseTitle) {
+            const container = document.getElementById(`certificate-${courseId}`);
+            if (container.style.display === 'none') {
+                const studentName = localStorage.getItem('name') || 'Student User';
+                container.innerHTML = `
+                    <div class="certificate">
+                        <h1>EduMaster LMS</h1>
+                        <h2>Certificate of Completion</h2>
+                        <p>This is to certify that</p>
+                        <h3>${studentName}</h3>
+                        <p>has successfully completed the course</p>
+                        <h3>${courseTitle}</h3>
+                        <p>Date: ${new Date().toLocaleDateString()}</p>
+                    </div>
+                `;
+                container.style.display = 'block';
+            } else {
+                container.style.display = 'none';
+            }
+        }
+
+        // Load data on page load
+        window.onload = async () => {
+            if (!localStorage.getItem('token')) {
+                window.location.href = '/login.html';
+                return;
+            }
+            // Fetch user profile
+            try {
+                const response = await authorizedFetch('/api/auth/profile');
+                if (response.ok) {
+                    const user = await response.json();
+                    localStorage.setItem('name', user.name);
+                }
+            } catch (err) {
+                console.error("Failed to load profile:", err);
+            }
+            loadAvailableCourses();
+            loadEnrolledCourses();
+        };
+    </script>
+</body>
+
+</html>
